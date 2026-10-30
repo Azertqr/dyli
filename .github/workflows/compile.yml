@@ -1,0 +1,57 @@
+name: Build and Inject iOSGods Mod
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download iOSGods Modded IPA via Pixeldrain API
+        run: |
+          # Utilisation de l'API Pixeldrain directe
+          curl -L -o modded.ipa "https://pixeldrain.com/api/file/8vUmrMYq"
+
+      - name: Extract dylib from iOSGods IPA
+        run: |
+          mkdir extracted_ipafiles
+          unzip -q modded.ipa -d extracted_ipafiles/
+          
+          # Trouve et copie le dylib du mod dans le dossier principal du repo
+          DYLIB_PATH=$(find extracted_ipafiles/Payload -name "*.dylib" | head -n 1)
+          cp "$DYLIB_PATH" ./libAmongUs_mod.dylib
+          echo "Dylib extrait avec succès !"
+
+      - name: Download clean Among Us IPA & Inject
+        run: |
+          # Télécharge un IPA propre d'Among Us de base
+          curl -L -o amongus.ipa "https://pixeldrain.com/api/file/wVooLoWS"
+          
+          # Installe optool pour l'injection
+          git clone https://github.com/alexzielenski/optool.git
+          cd optool && xcodebuild -project optool.xcodeproj -target optool -configuration Release -quiet && cd ..
+          
+          mkdir payload_temp
+          unzip -q amongus.ipa -d payload_temp/
+          
+          APP_PATH=$(find payload_temp/Payload -maxdepth 1 -name "*.app")
+          EXE_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP_PATH/Info.plist")
+          
+          # Injecte le .dylib chopé chez iOSGods dans l'IPA propre
+          cp libAmongUs_mod.dylib "$APP_PATH/"
+          ./optool/build/Release/optool install -c load -p "@executable_path/libAmongUs_mod.dylib" -t "$APP_PATH/$EXE_NAME"
+          
+          cd payload_temp
+          zip -qr ../AmongUs-FreeChat-Mod.ipa Payload
+          cd ..
+
+      - name: Upload Final IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AmongUs-FreeChat-Mod
+          path: AmongUs-FreeChat-Mod.ipa
+          retention-days: 7
